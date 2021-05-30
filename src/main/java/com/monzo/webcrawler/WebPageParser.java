@@ -5,7 +5,6 @@ import com.monzo.webcrawler.redis.WebCrawlerOutputRepo;
 import com.monzo.webcrawler.redis.WebPageContent;
 import com.monzo.webcrawler.redis.WebPageContentRepo;
 import com.monzo.webcrawler.sanitisers.URLObject;
-import com.monzo.webcrawler.sanitisers.URLSanitser;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -48,19 +47,19 @@ public class WebPageParser {
         this.kafkaTemplate = kafkaTemplate;
     }
 
-    @KafkaListener(topics = "webPages", groupId = "${webPages.topic.group.id}", containerFactory = "webPagesKafkaListenerContainerFactory")
+    @KafkaListener(topics = "${webPages.topic.name}", groupId = "${webPages.topic.group.id}", containerFactory = "webPagesKafkaListenerContainerFactory")
     public void parse(@Payload String baseUrl, @Header(KafkaHeaders.RECEIVED_MESSAGE_KEY) String url) {
-//        logger.info("PARSING "+url);
         Optional<WebPageContent> webPageContentToParse = webPageContentRepo.findById(url);
-        if (webPageContentToParse.isEmpty()) return;
-        String document = webPageContentRepo
-                .findById(url)
+        String document = webPageContentToParse
                 .orElse(WebPageContent
                         .builder()
                         .url("URL_NOT_FOUND")
                         .build())
                 .getPageContent();
-        if (document == null || document.isBlank()) return;
+        if (document == null || document.isBlank()) {
+            logger.warn(url+" was not found in web page repo");
+            return;
+        }
         Document doc = Jsoup.parse(document);
         doc.setBaseUri(baseUrl);
         Elements anchors = doc.select("a");
@@ -68,15 +67,13 @@ public class WebPageParser {
         for (Element anchor : anchors) {
             String absoluteUrl = anchor.absUrl("href");
             try {
-                absoluteUrl = new URLSanitser().sanitise(new URLObject(absoluteUrl));
+                absoluteUrl = new URLObject(absoluteUrl).getSanitzedUrl();
             } catch (MalformedURLException e) {
                 continue;
             }
             if (absoluteUrl.startsWith(baseUrl)) {
                 foundUrls.add(absoluteUrl);
-//                logger.info(absoluteUrl+" CHECKING");
                 if (!webPageContentRepo.existsById(absoluteUrl)) {
-//                    logger.info(absoluteUrl+" NOT IN PAGE CONTENTS");
                     kafkaTemplate.send(urlsTopicName, absoluteUrl, baseUrl);
                 }
             }
@@ -86,11 +83,11 @@ public class WebPageParser {
                 .baseUrl(baseUrl)
                 .children(foundUrls)
                 .build());
-        System.out.println("START ==========================");
-        System.out.println(url);
+        logger.info("START ==========================");
+        logger.info(url);
         for (String foundUrl : foundUrls) {
-            System.out.println("\t" + foundUrl);
+            logger.info("\t" + foundUrl);
         }
-        System.out.println("END ==========================");
+        logger.info("END ==========================");
     }
 }

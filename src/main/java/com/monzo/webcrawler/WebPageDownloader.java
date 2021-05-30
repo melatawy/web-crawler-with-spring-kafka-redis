@@ -26,20 +26,28 @@ public class WebPageDownloader {
 
     private WebPageContentRepo webPageContentRepo;
     private KafkaTemplate<String, String> kafkaTemplate;
+    private PageDownloader pageDownloader;
 
     @Autowired
-    public WebPageDownloader(WebPageContentRepo webPageContentRepo, KafkaTemplate<String, String> kafkaTemplate) {
+    public WebPageDownloader(WebPageContentRepo webPageContentRepo, KafkaTemplate<String, String> kafkaTemplate, PageDownloader pageDownloader) {
         this.webPageContentRepo = webPageContentRepo;
         this.kafkaTemplate = kafkaTemplate;
+        this.pageDownloader = pageDownloader;
     }
 
-    @KafkaListener(topics = "urls", groupId = "${urls.topic.group.id}", containerFactory = "urlsKafkaListenerContainerFactory")
+    @KafkaListener(topics = "${urls.topic.name}", groupId = "${urls.topic.group.id}", containerFactory = "urlsKafkaListenerContainerFactory")
     public void download(@Payload String baseUrl, @Header(KafkaHeaders.RECEIVED_MESSAGE_KEY) String url) throws IOException, InterruptedException {
         if (webPageContentRepo.existsById(url)) return;
         WebPageContent webPageContent = webPageContentRepo.save(WebPageContent.builder().url(url).build());
-//        logger.info("DOWNLOADING "+url);
-        String pageBody = PageDownloader.download(url);
-//        logger.info(url+" WILL BE SAVED AFTER DOWNLOADED NOW");
+        String pageBody = "";
+        try {
+            pageBody = pageDownloader.download(url);
+        } catch (IOException | InterruptedException e) {
+            logger.error("Failed to download URL "+url);
+            webPageContentRepo.delete(webPageContent);
+            throw e;
+        }
+        logger.info(url+" WILL BE SAVED AFTER DOWNLOADED NOW");
         webPageContent.setPageContent(pageBody);
         webPageContentRepo.save(webPageContent);
         kafkaTemplate.send(webPagesTopicName, url, baseUrl); // Sending URL as key. Base URL in the message

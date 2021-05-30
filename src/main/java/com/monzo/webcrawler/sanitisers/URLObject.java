@@ -9,10 +9,6 @@ public class URLObject {
     private URL url;
 
     public URLObject(String rawUrl) throws MalformedURLException {
-        this(rawUrl, URLObject.getBaseUrl(rawUrl));
-    }
-
-    public URLObject(String rawUrl, String baseUrl) throws MalformedURLException {
         this.rawUrl = rawUrl;
         this.url = new URL(rawUrl);
         this.sanitzedUrl = new URLSanitser().sanitise(this);
